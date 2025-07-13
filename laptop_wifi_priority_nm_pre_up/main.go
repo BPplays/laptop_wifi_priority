@@ -92,6 +92,11 @@ func main() {
 			"dns":          cfg.PubIPv4,
 		}
 
+		fmt.Println(cfg.PrivIPv6)
+		fmt.Println(cfg.PrivIPv4)
+		fmt.Println(cfg.PubIPv6)
+		fmt.Println(cfg.PubIPv4)
+
 		if hasPrefixAny(name, cfg.Prefixes) {
 			fmt.Println(" -> Private network: applying private DNS + token")
 			ipv6["dns"] = cfg.PrivIPv6
