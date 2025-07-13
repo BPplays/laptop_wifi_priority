@@ -129,7 +129,7 @@ func main() {
 			"ip6-privacy":    int32(2),
 			"dns-priority":   int32(1),
 			"dns":            pubIPv6Bytes,
-			"token":          nil,
+			// "token":          nil,
 		}
 
 		ipv4 := map[string]any{
