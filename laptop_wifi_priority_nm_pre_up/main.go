@@ -138,17 +138,17 @@ func main() {
 			"dns":          pubIPv4Nums,
 		}
 
-		fmt.Println(cfg.PrivIPv6)
-		fmt.Println(cfg.PrivIPv4)
-		fmt.Println(cfg.PubIPv6)
-		fmt.Println(cfg.PubIPv4)
-
-
-		fmt.Println(cfg.Ipv6Token)
-		ctok := sMap["ipv6"]["token"]
-		if ctok != nil {
-			fmt.Println(ctok)
-		}
+		// fmt.Println(cfg.PrivIPv6)
+		// fmt.Println(cfg.PrivIPv4)
+		// fmt.Println(cfg.PubIPv6)
+		// fmt.Println(cfg.PubIPv4)
+		//
+		//
+		// fmt.Println(cfg.Ipv6Token)
+		// ctok := sMap["ipv6"]["token"]
+		// if ctok != nil {
+		// 	fmt.Println(ctok)
+		// }
 
 		if hasPrefixAny(name, cfg.Prefixes) {
 			fmt.Println(" -> Private network: applying private DNS + token")
