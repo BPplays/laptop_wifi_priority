@@ -99,7 +99,6 @@ func main() {
 			ipv4["dns"] = cfg.PrivIPv4
 		} else if cType == "802-3-ethernet" {
 
-			fmt.Printf("settings ipv6 dns: %v", sMap["ipv6"]["dns"])
 			ipv6["dns"] = cfg.PrivIPv6
 			ipv4["dns"] = cfg.PrivIPv4
 
