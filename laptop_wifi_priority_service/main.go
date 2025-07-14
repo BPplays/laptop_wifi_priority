@@ -1,196 +1,343 @@
+// wifi_manager.go
 package main
 
 import (
 	"fmt"
-	"os/exec"
+	"log"
+	"sort"
 	"time"
+	"strings"
+	"os/exec"
+	"bytes"
 
+	gonm "github.com/Wifx/gonetworkmanager"
 	"github.com/godbus/dbus/v5"
+	"golang.org/x/sys/unix"
 )
 
 const (
-	loopInterval   = 30 * time.Second
-	scanThreshold  = 29 * time.Second
+	LoopInterval   = 30 * time.Second
+	ScanThreshold  = 29 * time.Second
 )
 
-// getKnownNetworks retrieves SSIDs of saved Wi-Fi connections via NetworkManager D-Bus
+// convertClockBootTimeToUnix converts D-Bus CLOCK_BOOTTIME ms timestamp to Unix time
+func convertClockBootTimeToUnix(clockBootMs uint64) (time.Time, error) {
+	// get CLOCK_BOOTTIME in seconds
+	var ts unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &ts); err != nil {
+		return time.Time{}, err
+	}
+	// current monotonic seconds since boot
+	bootSec := float64(ts.Sec) + float64(ts.Nsec)/1e9
+	// current Unix time
+	now := time.Now()
+	// compute boot base unix = now - bootSec
+	base := now.Add(-time.Duration(bootSec * float64(time.Second)))
+	// add the clockBootMs
+	return base.Add(time.Duration(clockBootMs) * time.Millisecond), nil
+}
+
+// getKnownNetworks returns SSIDs of saved Wi-Fi connections that have been used
 func getKnownNetworks() ([]string, error) {
-	conn, err := dbus.SystemBus()
+	settings, err := gonm.NewSettings()
 	if err != nil {
 		return nil, err
 	}
-	nmSettings := conn.Object("org.freedesktop.NetworkManager", "/org/freedesktop/NetworkManager/Settings")
-	var paths []dbus.ObjectPath
-	if err := nmSettings.Call("org.freedesktop.NetworkManager.Settings.ListConnections", 0).Store(&paths); err != nil {
+	conns, err := settings.ListConnections()
+	if err != nil {
 		return nil, err
 	}
-
-	var ssids []string
-	for _, path := range paths {
-		obj := conn.Object("org.freedesktop.NetworkManager", path)
-		var settings map[string]map[string]dbus.Variant
-		if err := obj.Call("org.freedesktop.NetworkManager.Settings.Connection.GetSettings", 0).Store(&settings); err != nil {
+	var known []string
+	for _, conn := range conns {
+		cs, err := conn.GetSettings()
+		if err != nil {
 			continue
 		}
-		if settings["connection"]["type"].Value().(string) != "802-11-wireless" {
-			continue
-		}
-		ssidVar := settings["802-11-wireless"]["ssid"]
-		// convert []byte to string
-		b := ssidVar.Value().([]byte)
-		ssid := string(b)
-
-		// check timestamp exists
-		if _, ok := settings["connection"]["timestamp"]; ok {
-			ssids = append(ssids, ssid)
+		if cs["connection"]["type"] == "802-11-wireless" {
+			ssidBytes := cs["802-11-wireless"]["ssid"].([]uint8)
+			ssid := string(ssidBytes)
+			// check timestamp key
+			if _, ok := cs["connection"]["timestamp"]; ok {
+				known = append(known, ssid)
+			}
 		}
 	}
-	return ssids, nil
+	return known, nil
 }
 
 // getCurrentConnection returns the SSID of the active Wi-Fi network
 func getCurrentConnection() (string, error) {
-	conn, err := dbus.SystemBus()
+	nm, err := gonm.NewNetworkManager()
 	if err != nil {
 		return "", err
 	}
-	nm := conn.Object("org.freedesktop.NetworkManager", "/org/freedesktop/NetworkManager")
-	var devPaths []dbus.ObjectPath
-	if err := nm.Call("org.freedesktop.NetworkManager.GetDevices", 0).Store(&devPaths); err != nil {
+	devs, err := nm.GetDevices()
+	if err != nil {
 		return "", err
 	}
-	for _, path := range devPaths {
-		dev := conn.Object("org.freedesktop.NetworkManager", path)
-		var devType uint32
-		_ = dev.GetProperty("org.freedesktop.NetworkManager.Device.DeviceType").Store(&devType)
-		if devType != 2 {
+	for _, d := range devs {
+		t, err := d.GetPropertyDeviceType()
+		if err != nil || t != gonm.NmDeviceTypeWifi {
 			continue
 		}
-		var state uint32
-		_ = dev.GetProperty("org.freedesktop.NetworkManager.Device.State").Store(&state)
-		if state != 100 {
+		state, err := d.GetPropertyState()
+		if err != nil || state != gonm.NmDeviceStateActivated {
 			continue
 		}
-		// active AP
-		var apPath dbus.ObjectPath
-		_ = dev.GetProperty("org.freedesktop.NetworkManager.Device.Wireless.ActiveAccessPoint").Store(&apPath)
-		if apPath == "" {
+		dw, err := gonm.NewDeviceWireless(d.GetPath())
+		if err != nil {
 			continue
 		}
-		ap := conn.Object("org.freedesktop.NetworkManager", apPath)
-		var ssid []byte
-		_ = ap.GetProperty("org.freedesktop.NetworkManager.AccessPoint.Ssid").Store(&ssid)
-		return string(ssid), nil
+		ap, err := dw.GetPropertyActiveAccessPoint()
+		if err != nil || ap == nil {
+			continue
+		}
+		ssid, err := ap.GetPropertySSID()
+		if err != nil {
+			return "", err
+		}
+		return ssid, nil
 	}
 	return "", nil
 }
 
-// getWifiNetworks scans available Wi-Fi networks
+// getWifiNetworks scans and returns available Wi-Fi networks
 func getWifiNetworks() ([]map[string]interface{}, error) {
-	conn, err := dbus.SystemBus()
+	nm, err := gonm.NewNetworkManager()
 	if err != nil {
 		return nil, err
 	}
-	nm := conn.Object("org.freedesktop.NetworkManager", "/org/freedesktop/NetworkManager")
-	var devPaths []dbus.ObjectPath
-	if err := nm.Call("org.freedesktop.NetworkManager.GetDevices", 0).Store(&devPaths); err != nil {
+	devs, err := nm.GetDevices()
+	if err != nil {
 		return nil, err
 	}
-
-	var nets []map[string]interface{}
-	for _, path := range devPaths {
-		dev := conn.Object("org.freedesktop.NetworkManager", path)
-		var devType uint32
-		_ = dev.GetProperty("org.freedesktop.NetworkManager.Device.DeviceType").Store(&devType)
-		if devType != 2 {
+	var list []map[string]interface{}
+	for _, d := range devs {
+		t, err := d.GetPropertyDeviceType()
+		if err != nil || t != gonm.NmDeviceTypeWifi {
 			continue
 		}
-		wifi := conn.Object("org.freedesktop.NetworkManager", path)
-		var apPaths []dbus.ObjectPath
-		_ = wifi.Call("org.freedesktop.NetworkManager.Device.Wireless.GetAccessPoints", 0).Store(&apPaths)
-		for _, apPath := range apPaths {
-			ap := conn.Object("org.freedesktop.NetworkManager", apPath)
-			var ssid []byte
-			var freq uint32
-			var strength uint8
-			_ = ap.GetProperty("org.freedesktop.NetworkManager.AccessPoint.Ssid").Store(&ssid)
-			_ = ap.GetProperty("org.freedesktop.NetworkManager.AccessPoint.Frequency").Store(&freq)
-			_ = ap.GetProperty("org.freedesktop.NetworkManager.AccessPoint.Strength").Store(&strength)
-			nets = append(nets, map[string]interface{}{
-				"ssid":      string(ssid),
+		dw, err := gonm.NewDeviceWireless(d.GetPath())
+		if err != nil {
+			continue
+		}
+		aps, err := dw.GetAccessPoints()
+		if err != nil {
+			continue
+		}
+		for _, ap := range aps {
+			ssid, _ := ap.GetPropertySSID()
+			freq, _ := ap.GetPropertyFrequency()
+			strength, _ := ap.GetPropertyStrength()
+			list = append(list, map[string]interface{}{
+				"ssid":      ssid,
 				"frequency": freq,
 				"strength":  strength,
 				"isKnown":   false,
 			})
 		}
 	}
-	return nets, nil
+	return list, nil
 }
 
-// convertBootTime converts NM LastScan boot time ms to Unix timestamp
-func convertBootTime(ms uint64) time.Time {
-	bootNow := time.Now().UnixNano()/1e9 - int64(time.Since(time.Now()))
-	return time.Unix(0, int64(ms)*int64(time.Millisecond)).Add(time.Duration(bootNow) * time.Second)
+// setWifiPriority sets autoconnect-priority on all connections matching paths
+func setWifiPriority(paths []dbus.ObjectPath, priority int32) {
+	bus, _ := dbus.SystemBus()
+	for _, p := range paths {
+		obj := bus.Object("org.freedesktop.NetworkManager", p)
+		iface := dbus.NewInterface(obj, "org.freedesktop.NetworkManager.Settings.Connection")
+		var settings map[string]map[string]interface{}
+		iface.Call("GetSettings", 0).Store(&settings)
+		settings["connection"]["autoconnect-priority"] = priority
+		iface.Call("Update", 0, settings)
+		fmt.Printf("Set priority %d on %s\n", priority, p)
+	}
 }
 
-// requestRescan triggers a Wi-Fi scan if threshold exceeded
-func requestRescan() error {
-	// Simplified: always request scan
-	cmd := exec.Command("nmcli", "device", "wifi", "rescan")
-	return cmd.Run()
+// getConnectionsBySSID finds saved connection paths for an SSID
+func getConnectionsBySSID(ssid string) ([]dbus.ObjectPath, error) {
+	settingsObj := dbus.ObjectPath("/org/freedesktop/NetworkManager/Settings")
+	bus, _ := dbus.SystemBus()
+	obj := bus.Object("org.freedesktop.NetworkManager", settingsObj)
+	var paths []dbus.ObjectPath
+	obj.Call("ListConnections", 0).Store(&paths)
+	var matches []dbus.ObjectPath
+	for _, p := range paths {
+		cobj := bus.Object("org.freedesktop/NetworkManager", p)
+		iface := dbus.NewInterface(cobj, "org.freedesktop.NetworkManager.Settings.Connection")
+		var cs map[string]map[string]interface{}
+		iface.Call("GetSettings", 0).Store(&cs)
+		if cs["connection"]["type"] == "802-11-wireless" {
+			b := cs["802-11-wireless"]["ssid"].([]uint8)
+			if string(b) == ssid {
+				matches = append(matches, p)
+			}
+		}
+	}
+	return matches, nil
 }
 
-// connectToSSID uses nmcli to connect
-func connectToSSID(ssid string, password ...string) error {
+// getFrequencyPriority assigns weight by SSID keywords
+func getFrequencyPriority(ssid string) int {
+	l := strings.ToLower(ssid)
+	switch {
+	case strings.Contains(l, "6ghz"), strings.Contains(l, "6g"):
+		return 60
+	case strings.Contains(l, "5ghz"), strings.Contains(l, "5g"):
+		return 50
+	case strings.Contains(l, "2.4ghz"), strings.Contains(l, "2ghz"), strings.Contains(l, "2g"):
+		return 24
+	}
+	return 0
+}
+
+// getStraPuni returns 100 if network qualifies by signal or is current
+func getStraPuni(strength uint8, sigMin int, ssid, current string) int {
+	if int(strength) >= sigMin || ssid == current {
+		return 100
+	}
+	return 0
+}
+
+func connectToSSID(ssid, password string) bool {
+	// Build base command arguments
 	args := []string{"dev", "wifi", "connect", ssid}
-	if len(password) > 0 {
-		args = append(args, "password", password[0])
+	if password != "" {
+		args = append(args, "password", password)
 	}
+
+	// Prepare the command
 	cmd := exec.Command("nmcli", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("connect error: %v: %s", err, string(out))
+
+	// Buffers to capture stdout and stderr
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+
+	// Run it
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("Failed to connect to %s: %s\n", ssid, errBuf.String())
+		return false
 	}
-	fmt.Println(string(out))
-	return nil
+
+	// Success
+	fmt.Print(outBuf.String())
+	return true
+}
+
+func printWifin(net map[string]interface{}) {
+	fmt.Printf("%s:\n", net["ssid"])
+	fmt.Printf("    frequency: %v\n", net["frequency"])
+	fmt.Printf("    strength:  %v\n", net["strength"])
+	fmt.Printf("    isKnown:   %v\n", net["isKnown"])
 }
 
 func main() {
+	var noNetExtra_sleep time.Duration = 0
 	for {
-		fmt.Println("Starting loop")
-
-		if err := requestRescan(); err != nil {
-			fmt.Println("Rescan failed:", err)
-		}
+		fmt.Println("Starting scan logic...")
+		// Rescan logic
+		// (Omitted for brevity: you can call RequestScan similarly to getAccessPoints)
 
 		known, _ := getKnownNetworks()
-		nets, _ := getWifiNetworks()
+		avail, _ := getWifiNetworks()
 		current, _ := getCurrentConnection()
+		sigMin := 15
 
-		// Mark known
-		for i := range nets {
-			ssid := nets[i]["ssid"].(string)
-			for _, k := range known {
-				if ssid == k {
-					nets[i]["isKnown"] = true
+		// mark known
+		for _, net := range avail {
+			for _, ks := range known {
+				if net["ssid"] == ks {
+					net["isKnown"] = true
 				}
 			}
 		}
 
-		// Sort logic omitted for brevity
+		// sort
+		sort.Slice(avail, func(i, j int) bool {
 
-		// Attempt connect
-		for _, netw := range nets {
-			s := netw["ssid"].(string)
-			if s != current {
-				fmt.Printf("Connecting to %s...\n", s)
-				err := connectToSSID(s)
-				if err == nil {
-					break
+			a, b := avail[i], avail[j]
+			// known first
+			aKnown := a["isKnown"].(bool)
+			bKnown := b["isKnown"].(bool)
+			if aKnown != bKnown {
+				return aKnown
+			}
+			// signal
+			aStr := int(a["strength"].(uint8))
+			bStr := int(b["strength"].(uint8))
+			if aStr != bStr {
+				return aStr > bStr
+			}
+			// frequency priority
+			aFreq := getFrequencyPriority(a["ssid"].(string))
+			bFreq := getFrequencyPriority(b["ssid"].(string))
+			return aFreq > bFreq
+		})
+
+		fmt.Println("Available networks:")
+		for _, net := range avail {
+			printWifin(net)
+		}
+
+		// set priorities
+		for idx, net := range avail {
+			paths, _ := getConnectionsBySSID(net["ssid"].(string))
+			prio := int32(len(avail) - idx + 10)
+			setWifiPriority(paths, prio)
+		}
+
+		// connect to best
+		if len(avail) > 0 {
+			noNetExtra_sleep = 0
+
+			best := avail[0]["ssid"].(string)
+			if best != current {
+				paths, _ := getConnectionsBySSID(best)
+				if len(paths) > 0 {
+					// activate first match
+					nm, _ := gonm.NewNetworkManager()
+					devs, _ := nm.GetDevices()
+					// find wifi device
+					for _, d := range devs {
+						t, _ := d.GetPropertyDeviceType()
+						if t != gonm.NmDeviceTypeWifi {
+							continue
+						}
+						dw, _ := gonm.NewDeviceWireless(d.GetPath())
+						aps, _ := dw.GetAccessPoints()
+						// find AP matching SSID
+						var target *gonm.AccessPoint
+						for _, ap := range aps {
+							if ss, _ := ap.GetPropertySSID(); ss == best {
+								target = &ap
+								break
+							}
+						}
+						if target != nil {
+							conn, _ := gonm.NewConnection(paths[0])
+							nm.ActivateWirelessConnection(conn, d, *target)
+							fmt.Println("Connecting to", best)
+						}
+					}
 				}
+			}
+		} else {
+			log.Println("no networks found.")
+			time.Sleep(noNetExtra_sleep)
+
+			if noNetExtra_sleep < 500 * time.Millisecond {
+				noNetExtra_sleep = 500 * time.Millisecond
+			}
+
+			noNetExtra_sleep = time.Duration(float64(noNetExtra_sleep) * 1.2)
+
+			if noNetExtra_sleep > 100 * time.Second {
+				noNetExtra_sleep = 100 * time.Second
 			}
 		}
 
-		time.Sleep(loopInterval)
+		// sleep
+		time.Sleep(LoopInterval)
 	}
 }
