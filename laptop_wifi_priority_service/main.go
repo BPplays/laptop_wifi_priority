@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 	"strings"
+	"os"
 	"os/exec"
 	"bytes"
 
@@ -140,18 +141,57 @@ func getWifiNetworks() ([]map[string]interface{}, error) {
 	return list, nil
 }
 
-// setWifiPriority sets autoconnect-priority on all connections matching paths
-func setWifiPriority(paths []dbus.ObjectPath, priority int32) {
-	bus, _ := dbus.SystemBus()
-	for _, p := range paths {
-		obj := bus.Object("org.freedesktop.NetworkManager", p)
-		iface := dbus.NewInterface(obj, "org.freedesktop.NetworkManager.Settings.Connection")
-		var settings map[string]map[string]interface{}
-		iface.Call("GetSettings", 0).Store(&settings)
-		settings["connection"]["autoconnect-priority"] = priority
-		iface.Call("Update", 0, settings)
-		fmt.Printf("Set priority %d on %s\n", priority, p)
+func setWiFiPriority(conns []dbus.ObjectPath, priority int32) {
+	// Connect to the system bus
+	conn, err := dbus.SystemBus()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to connect to system bus: %v\n", err)
+		return
 	}
+
+	for _, objPath := range conns {
+		fmt.Printf("Trying to set priority for %s to %d\n", objPath, priority)
+
+		obj := conn.Object("org.freedesktop.NetworkManager", objPath)
+
+		// 1) Retrieve current settings
+		var settings map[string]map[string]dbus.Variant
+		getCall := obj.Call(
+			"org.freedesktop.NetworkManager.Settings.Connection.GetSettings",
+			0,
+		)
+		if getCall.Err != nil {
+			fmt.Printf("  → GetSettings failed for %s: %v\n", objPath, getCall.Err)
+			continue
+		}
+		if err := getCall.Store(&settings); err != nil {
+			fmt.Printf("  → Could not parse settings for %s: %v\n", objPath, err)
+			continue
+		}
+
+		// 2) Update autoconnect-priority
+		connGrp, ok := settings["connection"]
+		if !ok {
+			connGrp = make(map[string]dbus.Variant)
+		}
+		connGrp["autoconnect-priority"] = dbus.MakeVariant(priority)
+		settings["connection"] = connGrp
+
+		// 3) Push updated settings back
+		updateCall := obj.Call(
+			"org.freedesktop.NetworkManager.Settings.Connection.Update",
+			0,
+			settings,
+		)
+		if updateCall.Err != nil {
+			fmt.Printf("  → Update failed for %s: %v\n", objPath, updateCall.Err)
+			continue
+		}
+
+		fmt.Printf("  ✓ Priority set for %s to %d\n", objPath, priority)
+	}
+
+	fmt.Println("All connections processed.")
 }
 
 // getConnectionsBySSID finds saved connection paths for an SSID
@@ -284,7 +324,7 @@ func main() {
 		for idx, net := range avail {
 			paths, _ := getConnectionsBySSID(net["ssid"].(string))
 			prio := int32(len(avail) - idx + 10)
-			setWifiPriority(paths, prio)
+			setWiFiPriority(paths, prio)
 		}
 
 		// connect to best
