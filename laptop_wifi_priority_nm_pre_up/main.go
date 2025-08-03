@@ -116,7 +116,9 @@ func main() {
 			log.Printf(" → skip %s: cannot read settings: %v", conn.GetPath(), err)
 			continue
 		}
-		if sMap["connection"]["id"] != currentIf { continue }
+		if *currentIf != "" {
+			if sMap["connection"]["id"] != *currentIf { continue }
+		}
 
 		// Only care about 802‑11‑wireless
 		cType := sMap["connection"]["type"].(string)
