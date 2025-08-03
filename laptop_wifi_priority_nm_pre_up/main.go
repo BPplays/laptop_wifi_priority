@@ -132,7 +132,6 @@ func main() {
 			"token":          "",
 		}
 
-		delete(ipv6, "token")
 
 		ipv4 := map[string]any{
 			"method":       "auto",
