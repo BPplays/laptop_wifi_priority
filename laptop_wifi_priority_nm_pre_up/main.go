@@ -1,11 +1,12 @@
 package main
 
 import (
+	"encoding/binary"
+	"flag"
 	"fmt"
 	"log"
-	"os"
 	"net"
-    "encoding/binary"
+	"os"
 
 	"github.com/Wifx/gonetworkmanager"
 	"gopkg.in/yaml.v2"
@@ -67,6 +68,8 @@ func ipsToUint32(addrs []string) ([]uint32, error) {
 }
 
 func main() {
+	currentIf := flag.String("i", "", "")
+
 	// Load your YAML config
 	cfg, err := loadConfig("/etc/laptop_wifi_priority_nm_pre_up.yml")
 	if err != nil {
@@ -113,6 +116,7 @@ func main() {
 			log.Printf(" → skip %s: cannot read settings: %v", conn.GetPath(), err)
 			continue
 		}
+		if sMap["connection"]["id"] != currentIf { continue }
 
 		// Only care about 802‑11‑wireless
 		cType := sMap["connection"]["type"].(string)
