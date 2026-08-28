@@ -144,21 +144,32 @@ func main() {
 		name := sMap["connection"]["id"].(string)
 		log.Printf("Modifying connection: %s\n", name)
 
-		ipv6 := map[string]any{
-			// "method":         "auto",
-			// "addr-gen-mode":  int32(0), // use eui-64
-			// "ip6-privacy":    int32(2),
-			"dns-priority": int32(1_000),
-			"dns-data":     cfg.PubIPv6,
-			"token":          "",
-		}
 
+		ipv6 := sMap["ipv6"]
+		ipv4 := sMap["ipv4"]
 
-		ipv4 := map[string]any{
-			// "method":       "auto",
-			"dns-priority": int32(20_1_000),
-			"dns-data":     cfg.PubIPv4,
-		}
+		ipv6["dns-priority"] = int32(1_000)
+		ipv6["dns-data"] = cfg.PubIPv6
+		ipv6["token"] = ""
+
+		ipv4["dns-priority"] = int32(20_1_000)
+		ipv4["dns-data"] = cfg.PubIPv4
+
+		// ipv6 := map[string]any{
+		// 	// "method":         "auto",
+		// 	// "addr-gen-mode":  int32(0), // use eui-64
+		// 	// "ip6-privacy":    int32(2),
+		// 	"dns-priority": int32(1_000),
+		// 	"dns-data":     cfg.PubIPv6,
+		// 	"token":          "",
+		// }
+		//
+		//
+		// ipv4 := map[string]any{
+		// 	// "method":       "auto",
+		// 	"dns-priority": int32(20_1_000),
+		// 	"dns-data":     cfg.PubIPv4,
+		// }
 
 		// fmt.Println(cfg.PrivIPv6)
 		// fmt.Println(cfg.PrivIPv4)
