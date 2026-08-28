@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 
@@ -23,6 +24,23 @@ type Config struct {
 	PubIPv6   []string `yaml:"pub_ipv6"`
 	PubIPv4   []string `yaml:"pub_ipv4"`
 	Ipv6Token string   `yaml:"ipv6_token"`
+}
+
+// NetworkManager legacy IPv6 address:
+// (ay, u, ay) == address, prefix, gateway
+type nmIPv6Address struct {
+	Address []byte
+	Prefix  uint32
+	Gateway []byte
+}
+
+// NetworkManager legacy IPv6 route:
+// (ay, u, ay, u) == destination, prefix, next-hop, metric
+type nmIPv6Route struct {
+	Destination []byte
+	Prefix      uint32
+	NextHop     []byte
+	Metric      uint32
 }
 
 func loadConfig(path string) (*Config, error) {
@@ -68,6 +86,136 @@ func getString(
 	return s, ok
 }
 
+/*
+ * Convert legacy IPv6 address property back to its actual D-Bus type:
+ *
+ *     a(ayuay)
+ *
+ * godbus decodes incoming D-Bus structs as []interface{}.
+ * Variant.Store() converts those generic structs into our typed struct.
+ */
+func normalizeIPv6Addresses(section map[string]dbus.Variant) error {
+	v, ok := section["addresses"]
+	if !ok {
+		return nil
+	}
+
+	var addresses []nmIPv6Address
+
+	if err := v.Store(&addresses); err != nil {
+		return fmt.Errorf("decode ipv6.addresses: %w", err)
+	}
+
+	section["addresses"] = dbus.MakeVariant(addresses)
+
+	return nil
+}
+
+/*
+ * Convert legacy IPv6 route property back to:
+ *
+ *     a(ayuayu)
+ */
+func normalizeIPv6Routes(section map[string]dbus.Variant) error {
+	v, ok := section["routes"]
+	if !ok {
+		return nil
+	}
+
+	var routes []nmIPv6Route
+
+	if err := v.Store(&routes); err != nil {
+		return fmt.Errorf("decode ipv6.routes: %w", err)
+	}
+
+	section["routes"] = dbus.MakeVariant(routes)
+
+	return nil
+}
+
+/*
+ * IPv4 addresses use:
+ *
+ *     aau
+ *
+ * which is [][]uint32 in Go.
+ */
+func normalizeIPv4Addresses(section map[string]dbus.Variant) error {
+	v, ok := section["addresses"]
+	if !ok {
+		return nil
+	}
+
+	var addresses [][]uint32
+
+	if err := v.Store(&addresses); err != nil {
+		return fmt.Errorf("decode ipv4.addresses: %w", err)
+	}
+
+	section["addresses"] = dbus.MakeVariant(addresses)
+
+	return nil
+}
+
+/*
+ * IPv4 routes also use:
+ *
+ *     aau
+ *
+ * with four uint32 values per route:
+ *
+ *   destination
+ *   prefix
+ *   next-hop
+ *   metric
+ */
+func normalizeIPv4Routes(section map[string]dbus.Variant) error {
+	v, ok := section["routes"]
+	if !ok {
+		return nil
+	}
+
+	var routes [][]uint32
+
+	if err := v.Store(&routes); err != nil {
+		return fmt.Errorf("decode ipv4.routes: %w", err)
+	}
+
+	section["routes"] = dbus.MakeVariant(routes)
+
+	return nil
+}
+
+/*
+ * Normalize the legacy properties that godbus decodes as generic
+ * interface slices.
+ */
+func normalizeSettings(
+	settings map[string]map[string]dbus.Variant,
+) error {
+	if ipv6, ok := settings["ipv6"]; ok {
+		if err := normalizeIPv6Addresses(ipv6); err != nil {
+			return err
+		}
+
+		if err := normalizeIPv6Routes(ipv6); err != nil {
+			return err
+		}
+	}
+
+	if ipv4, ok := settings["ipv4"]; ok {
+		if err := normalizeIPv4Addresses(ipv4); err != nil {
+			return err
+		}
+
+		if err := normalizeIPv4Routes(ipv4); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func main() {
 	currentIf := flag.String("i", "", "")
 	_ = flag.String("a", "", "")
@@ -81,43 +229,48 @@ func main() {
 		*connectionID,
 	)
 
-	cfg, err := loadConfig("/etc/laptop_wifi_priority_nm_pre_up.yml")
+	cfg, err := loadConfig(
+		"/etc/laptop_wifi_priority_nm_pre_up.yml",
+	)
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
-	// Connect to the system D-Bus.
+	/*
+	 * Connect directly to the system bus.
+	 */
 	bus, err := dbus.SystemBus()
 	if err != nil {
 		log.Fatalf("cannot connect to system D-Bus: %v", err)
 	}
 
-	// Get NetworkManager Settings object.
 	settingsObj := bus.Object(
 		nmService,
 		dbus.ObjectPath(nmSettingsPath),
 	)
 
-	// List saved connection object paths.
+	/*
+	 * List saved connection object paths.
+	 */
 	var connectionPaths []dbus.ObjectPath
 
 	err = settingsObj.Call(
 		nmSettingsInterface+".ListConnections",
 		0,
 	).Store(&connectionPaths)
+
 	if err != nil {
 		log.Fatalf("failed to list NM connections: %v", err)
 	}
 
 	for _, connectionPath := range connectionPaths {
-		connObj := bus.Object(nmService, connectionPath)
+		connObj := bus.Object(
+			nmService,
+			connectionPath,
+		)
 
 		/*
-		 * GetSettings directly through D-Bus.
-		 *
-		 * This is the important difference from gonetworkmanager:
-		 * values remain dbus.Variant values, preserving their original
-		 * D-Bus signatures.
+		 * Get the complete connection profile.
 		 */
 		var settings map[string]map[string]dbus.Variant
 
@@ -135,31 +288,18 @@ func main() {
 			continue
 		}
 
-		connectionSection, ok := settings["connection"]
-		if !ok {
-			log.Printf(
-				" → skip %s: missing connection section",
-				connectionPath,
-			)
-			continue
-		}
-
 		/*
-		 * connection.type
+		 * Identify the connection type.
 		 */
-		typeVariant, ok := connectionSection["type"]
+		connectionType, ok := getString(
+			settings,
+			"connection",
+			"type",
+		)
+
 		if !ok {
 			log.Printf(
 				" → skip %s: missing connection.type",
-				connectionPath,
-			)
-			continue
-		}
-
-		connectionType, ok := typeVariant.Value().(string)
-		if !ok {
-			log.Printf(
-				" → skip %s: invalid connection.type",
 				connectionPath,
 			)
 			continue
@@ -171,9 +311,14 @@ func main() {
 		}
 
 		/*
-		 * connection.id
+		 * Get connection ID.
 		 */
-		name, ok := getString(settings, "connection", "id")
+		name, ok := getString(
+			settings,
+			"connection",
+			"id",
+		)
+
 		if !ok {
 			log.Printf(
 				" → skip %s: missing connection.id",
@@ -183,13 +328,32 @@ func main() {
 		}
 
 		/*
-		 * Restrict to one connection when -c was supplied.
+		 * Restrict to -c when requested.
 		 */
-		if *connectionID != "" && name != *connectionID {
+		if *connectionID != "" &&
+			name != *connectionID {
 			continue
 		}
 
 		log.Printf("Modifying connection: %s", name)
+
+		/*
+		 * IMPORTANT:
+		 *
+		 * GetSettings() gives us D-Bus Variants, but godbus represents
+		 * incoming D-Bus structs generically.
+		 *
+		 * Restore the exact NetworkManager struct types before
+		 * Update2().
+		 */
+		if err := normalizeSettings(settings); err != nil {
+			log.Printf(
+				" → skip %s: cannot normalize settings: %v",
+				name,
+				err,
+			)
+			continue
+		}
 
 		ipv6, ok := settings["ipv6"]
 		if !ok {
@@ -210,50 +374,57 @@ func main() {
 		}
 
 		/*
-		 * Defaults.
-		 *
-		 * Everything else in ipv4/ipv6 remains untouched.
+		 * Public/default configuration.
 		 */
-		ipv6["dns-priority"] = dbus.MakeVariant(int32(1000))
-		ipv6["dns-data"] = dbus.MakeVariant(cfg.PubIPv6)
+		ipv6["dns-priority"] =
+			dbus.MakeVariant(int32(1000))
 
-		ipv4["dns-priority"] = dbus.MakeVariant(int32(201000))
-		ipv4["dns-data"] = dbus.MakeVariant(cfg.PubIPv4)
+		ipv6["dns-data"] =
+			dbus.MakeVariant(cfg.PubIPv6)
+
+		ipv4["dns-priority"] =
+			dbus.MakeVariant(int32(201000))
+
+		ipv4["dns-data"] =
+			dbus.MakeVariant(cfg.PubIPv4)
 
 		/*
 		 * Private network.
 		 */
 		if hasPrefixAny(name, cfg.Prefixes) {
-			log.Println(" -> Private network: applying private DNS + token")
+			log.Println(
+				" -> Private network: applying private DNS + token",
+			)
 
-			ipv6["dns-data"] = dbus.MakeVariant(cfg.PrivIPv6)
-			ipv6["token"] = dbus.MakeVariant(cfg.Ipv6Token)
+			ipv6["dns-data"] =
+				dbus.MakeVariant(cfg.PrivIPv6)
 
-			ipv4["dns-data"] = dbus.MakeVariant(cfg.PrivIPv4)
+			ipv6["token"] =
+				dbus.MakeVariant(cfg.Ipv6Token)
+
+			ipv4["dns-data"] =
+				dbus.MakeVariant(cfg.PrivIPv4)
 
 		} else if connectionType == "802-3-ethernet" {
-			log.Println(" -> Ethernet network: restoring default DNS/token")
+			log.Println(
+				" -> Ethernet network: restoring default DNS/token",
+			)
 
-			/*
-			 * Removing the Variant means the setting/property is
-			 * omitted from the resulting profile.
-			 */
 			delete(ipv6, "token")
 			delete(ipv6, "dns-data")
 			delete(ipv4, "dns-data")
+
 		} else {
 			/*
-			 * Non-private Wi-Fi: use public DNS and no token.
+			 * Non-private Wi-Fi.
 			 */
 			delete(ipv6, "token")
 		}
 
 		/*
-		 * Update2() still requires the complete connection settings.
+		 * Persist the complete profile.
 		 *
-		 * However, because we got the settings directly as
-		 * map[string]map[string]dbus.Variant, properties we did not
-		 * touch retain their original D-Bus signatures.
+		 * 0x1 = NM_SETTINGS_UPDATE2_FLAG_TO_DISK
 		 */
 		var result map[string]dbus.Variant
 
@@ -261,19 +432,19 @@ func main() {
 			nmConnectionInterface+".Update2",
 			0,
 			settings,
-			uint32(1), // to-disk
+			uint32(1),
 			map[string]dbus.Variant{},
 		).Store(&result)
 
 		if err != nil {
 			log.Printf(
-				" ⨉  failed to update %s: %v",
+				" ⨉ failed to update %s: %v",
 				name,
 				err,
 			)
 			continue
 		}
 
-		log.Printf(" ◯  updated %s", name)
+		log.Printf(" ◯ updated %s", name)
 	}
 }
