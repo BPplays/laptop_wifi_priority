@@ -172,12 +172,12 @@ func main() {
 		// }
 
 		if hasPrefixAny(name, cfg.Prefixes) {
-			fmt.Println(" -> Private network: applying private DNS + token")
+			log.Println(" -> Private network: applying private DNS + token")
 			ipv6["dns-data"] = cfg.PrivIPv6
 			ipv6["token"] = cfg.Ipv6Token
 			ipv4["dns-data"] = cfg.PrivIPv4
 		} else if cType == "802-3-ethernet" {
-			fmt.Println(" -> Ethernet network: setting dns and token to default")
+			log.Println(" -> Ethernet network: setting dns and token to default")
 
 			// ipv6["dns"] = privIPv6Bytes
 			// ipv4["dns"] = privIPv4Nums
