@@ -267,13 +267,13 @@ func main() {
 
 		if err != nil {
 			log.Printf(
-				" ✗ failed to update %s: %v",
+				" ⨉  failed to update %s: %v",
 				name,
 				err,
 			)
 			continue
 		}
 
-		log.Printf(" ✓ updated %s", name)
+		log.Printf(" ◯  updated %s", name)
 	}
 }
