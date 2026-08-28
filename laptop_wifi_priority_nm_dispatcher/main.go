@@ -14,7 +14,6 @@ import (
 
 	"github.com/godbus/dbus/v5"
 	"github.com/projectdiscovery/utils/slice"
-	"golang.org/x/text/cases"
 	"gopkg.in/yaml.v2"
 )
 
