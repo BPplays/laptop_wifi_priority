@@ -314,8 +314,19 @@ func main() {
 	}
 
 
+	log.Printf(
+		" → auto ns v6 list: %v",
+		v6_auto_ns,
+		)
+
+	log.Printf(
+		" → auto ns v4 list: %v",
+		v4_auto_ns,
+		)
+
 	cfg.PrivIPv6 = decide_auto_ns(cfg.PrivIPv6, v6_auto_ns, *preferAuto)
 	cfg.PrivIPv4 = decide_auto_ns(cfg.PrivIPv4, v4_auto_ns, *preferAuto)
+
 
 
 	log.Printf(
