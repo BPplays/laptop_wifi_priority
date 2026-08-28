@@ -506,7 +506,7 @@ func main() {
 		local_networks_match {
 			if local_networks_match {
 				log.Println(
-					" -> Matched network provided DNS to a Local domain treating as private",
+					" -> Matched network provided DNS to a Local network; treating as private",
 				)
 			}
 
