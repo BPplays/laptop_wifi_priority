@@ -1,13 +1,14 @@
 package main
 
 import (
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"log"
-	"os"
-	"net"
 	"math/bits"
-	"encoding/binary"
+	"net"
+	"net/netip"
+	"os"
 
 	"github.com/godbus/dbus/v5"
 	"gopkg.in/yaml.v2"
@@ -224,13 +225,17 @@ func reverseIPv4(ips []string) []string {
 	out := make([]string, 0, len(ips))
 
 	for _, ipStr := range ips {
-		ip := net.ParseIP(ipStr).To4()
-		if ip == nil {
+		ip, err := netip.ParseAddr(ipStr)
+		if err != nil {
+			continue
+		}
+		if !ip.Is4() {
 			continue
 		}
 
-		v := binary.BigEndian.Uint32(ip)
-		v = bits.ReverseBytes32(v)
+		ipb := ip.As4()
+		v := binary.LittleEndian.Uint32(ipb[:])
+		// v = bits.ReverseBytes32(v)
 
 		var buf [4]byte
 		binary.BigEndian.PutUint32(buf[:], v)
@@ -260,6 +265,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
+
+
+	log.Printf(
+		" → private IPv4 dns: %v; and reversed: %v",
+		cfg.PrivIPv4,
+		reverseIPv4(cfg.PrivIPv4),
+		)
 
 	/*
 	 * Connect directly to the system bus.
