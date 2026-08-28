@@ -62,7 +62,8 @@ func ipsToUint32(addrs []string) ([]uint32, error) {
         if ip == nil {
             return nil, fmt.Errorf("invalid IPv4 address: %s", s)
         }
-        out = append(out, binary.BigEndian.Uint32(ip))
+        // out = append(out, binary.BigEndian.Uint32(ip))
+        out = append(out, binary.LittleEndian.Uint32(ip))
     }
     return out, nil
 }
