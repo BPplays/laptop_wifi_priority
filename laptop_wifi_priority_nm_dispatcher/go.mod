@@ -4,10 +4,8 @@ go 1.25.0
 
 require (
 	github.com/Wifx/gonetworkmanager v0.5.0
+	github.com/godbus/dbus/v5 v5.2.2
 	gopkg.in/yaml.v2 v2.4.0
 )
 
-require (
-	github.com/godbus/dbus/v5 v5.2.2 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-)
+require golang.org/x/sys v0.47.0 // indirect
