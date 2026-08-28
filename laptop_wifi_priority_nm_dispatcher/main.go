@@ -71,10 +71,11 @@ func ipsToUint32(addrs []string) ([]uint32, error) {
 func main() {
 	currentIf := flag.String("i", "", "")
 	_ = flag.String("a", "", "") // if we need `action` later
+	connection_id := flag.String("c", "", "")
 
 	flag.Parse()
 
-	log.Printf("started for IF: %s\n", *currentIf)
+	log.Printf("started for IF: %s; CON ID: %s\n", *currentIf, *connection_id)
 
 
 	// Load your YAML config
@@ -123,15 +124,15 @@ func main() {
 			log.Printf(" → skip %s: cannot read settings: %v\n", conn.GetPath(), err)
 			continue
 		}
-		if *currentIf != "" {
-			// if sMap["connection"]["id"] != *currentIf { continue }
-			iface, _ := sMap["connection"]["interface-name"].(string)
-			if iface != *currentIf {
-				log.Printf(" → skip %s: not equal to -i [%s]\n", iface, *currentIf)
-				continue
-			} else {
-				log.Printf(" → found %s\n", iface, *currentIf)
-			}
+		if *connection_id != "" {
+			if sMap["connection"]["id"] != *connection_id { continue }
+			// iface, _ := sMap["connection"]["interface-name"].(string)
+			// if iface != *currentIf {
+			// 	log.Printf(" → skip %s: not equal to -i [%s]\n", iface, *currentIf)
+			// 	continue
+			// } else {
+			// 	log.Printf(" → found %s\n", iface, *currentIf)
+			// }
 		}
 
 		// Only care about 802‑11‑wireless
