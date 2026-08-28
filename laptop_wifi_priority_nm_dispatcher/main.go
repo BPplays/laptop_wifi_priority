@@ -70,6 +70,9 @@ func ipsToUint32(addrs []string) ([]uint32, error) {
 
 func main() {
 	currentIf := flag.String("i", "", "")
+	_ = flag.String("a", "", "") // if we need `action` later
+
+	flag.Parse()
 
 	// Load your YAML config
 	cfg, err := loadConfig("/etc/laptop_wifi_priority_nm_pre_up.yml")
@@ -79,23 +82,23 @@ func main() {
 
 	// fmt.Println("token to nmformat: %v")
 
-    privIPv6Bytes, err := ipsToBytes(cfg.PrivIPv6)
-    if err != nil {
-        log.Fatalf("invalid priv_ipv6 in config: %v", err)
-    }
-    pubIPv6Bytes, err := ipsToBytes(cfg.PubIPv6)
-    if err != nil {
-        log.Fatalf("invalid pub_ipv6 in config: %v", err)
-    }
-
-    privIPv4Nums, err := ipsToUint32(cfg.PrivIPv4)
-    if err != nil {
-        log.Fatalf("invalid priv_ipv4 in config: %v", err)
-    }
-    pubIPv4Nums, err := ipsToUint32(cfg.PubIPv4)
-    if err != nil {
-        log.Fatalf("invalid pub_ipv4 in config: %v", err)
-    }
+    // privIPv6Bytes, err := ipsToBytes(cfg.PrivIPv6)
+    // if err != nil {
+    //     log.Fatalf("invalid priv_ipv6 in config: %v", err)
+    // }
+    // pubIPv6Bytes, err := ipsToBytes(cfg.PubIPv6)
+    // if err != nil {
+    //     log.Fatalf("invalid pub_ipv6 in config: %v", err)
+    // }
+    //
+    // privIPv4Nums, err := ipsToUint32(cfg.PrivIPv4)
+    // if err != nil {
+    //     log.Fatalf("invalid priv_ipv4 in config: %v", err)
+    // }
+    // pubIPv4Nums, err := ipsToUint32(cfg.PubIPv4)
+    // if err != nil {
+    //     log.Fatalf("invalid pub_ipv4 in config: %v", err)
+    // }
 
 	// Connect to NM Settings interface
 	settingsSvc, err := gonetworkmanager.NewSettings()
@@ -131,19 +134,19 @@ func main() {
 		fmt.Printf("Modifying connection: %s\n", name)
 
 		ipv6 := map[string]any{
-			"method":         "auto",
-			"addr-gen-mode":  int32(0), // use eui-64
-			"ip6-privacy":    int32(2),
+			// "method":         "auto",
+			// "addr-gen-mode":  int32(0), // use eui-64
+			// "ip6-privacy":    int32(2),
 			"dns-priority":   int32(1),
-			"dns":            pubIPv6Bytes,
+			"dns-data":     cfg.PubIPv6,
 			"token":          "",
 		}
 
 
 		ipv4 := map[string]any{
-			"method":       "auto",
+			// "method":       "auto",
 			"dns-priority": int32(2),
-			"dns":          pubIPv4Nums,
+			"dns-data":     cfg.PubIPv4,
 		}
 
 		// fmt.Println(cfg.PrivIPv6)
@@ -160,17 +163,17 @@ func main() {
 
 		if hasPrefixAny(name, cfg.Prefixes) {
 			fmt.Println(" -> Private network: applying private DNS + token")
-			ipv6["dns"] = privIPv6Bytes
+			ipv6["dns-data"] = cfg.PrivIPv6
 			ipv6["token"] = cfg.Ipv6Token
-			ipv4["dns"] = privIPv4Nums
+			ipv4["dns-data"] = cfg.PrivIPv4
 		} else if cType == "802-3-ethernet" {
 
 			// ipv6["dns"] = privIPv6Bytes
 			// ipv4["dns"] = privIPv4Nums
 
 			delete(ipv6, "token")
-			delete(ipv6, "dns")
-			delete(ipv4, "dns")
+			delete(ipv6, "dns-data")
+			delete(ipv4, "dns-data")
 		}
 
 		// Inject our maps back into the connection settings
