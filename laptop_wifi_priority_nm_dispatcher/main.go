@@ -141,7 +141,7 @@ func main() {
 		}
 
 		name := sMap["connection"]["id"].(string)
-		fmt.Printf("Modifying connection: %s\n", name)
+		log.Printf("Modifying connection: %s\n", name)
 
 		ipv6 := map[string]any{
 			// "method":         "auto",
