@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"net"
+	"math/bits"
+	"encoding/binary"
 
 	"github.com/godbus/dbus/v5"
 	"gopkg.in/yaml.v2"
@@ -216,6 +219,28 @@ func normalizeSettings(
 	return nil
 }
 
+
+func reverseIPv4(ips []string) []string {
+	out := make([]string, 0, len(ips))
+
+	for _, ipStr := range ips {
+		ip := net.ParseIP(ipStr).To4()
+		if ip == nil {
+			continue
+		}
+
+		v := binary.BigEndian.Uint32(ip)
+		v = bits.ReverseBytes32(v)
+
+		var buf [4]byte
+		binary.BigEndian.PutUint32(buf[:], v)
+
+		out = append(out, net.IP(buf[:]).String())
+	}
+
+	return out
+}
+
 func main() {
 	currentIf := flag.String("i", "", "")
 	_ = flag.String("a", "", "")
@@ -386,7 +411,7 @@ func main() {
 			dbus.MakeVariant(int32(201000))
 
 		ipv4["dns-data"] =
-			dbus.MakeVariant(cfg.PubIPv4)
+			dbus.MakeVariant(reverseIPv4(cfg.PubIPv4))
 
 		/*
 		 * Private network.
@@ -403,7 +428,7 @@ func main() {
 				dbus.MakeVariant(cfg.Ipv6Token)
 
 			ipv4["dns-data"] =
-				dbus.MakeVariant(cfg.PrivIPv4)
+				dbus.MakeVariant(reverseIPv4(cfg.PrivIPv4))
 
 		} else if connectionType == "802-3-ethernet" {
 			log.Println(
