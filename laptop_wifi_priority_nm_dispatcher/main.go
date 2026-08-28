@@ -26,6 +26,7 @@ const (
 
 type Config struct {
 	Prefixes  []string `yaml:"prefixes"`
+	LocalNetworks  []netip.Prefix `yaml:"local_networks"`
 	PrivIPv6  []string `yaml:"priv_ipv6"`
 	PrivIPv4  []string `yaml:"priv_ipv4"`
 	PubIPv6   []string `yaml:"pub_ipv6"`
@@ -307,12 +308,17 @@ func main() {
 	)
 
 	cfg, err := loadConfig(
-		"/etc/laptop_wifi_priority_nm_pre_up.yml",
+		"/etc/laptop_wifi_priority_nm_dispatcher.yml",
 	)
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
+
+	log.Printf(
+		" → local networks: %v",
+		cfg.LocalNetworks,
+		)
 
 	log.Printf(
 		" → auto ns v6 list: %v",
