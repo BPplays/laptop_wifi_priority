@@ -129,6 +129,8 @@ func main() {
 			if iface != *currentIf {
 				log.Printf(" → skip %s: not equal to -i [%s]\n", iface, *currentIf)
 				continue
+			} else {
+				log.Printf(" → found %s\n", iface, *currentIf)
 			}
 		}
 
