@@ -239,8 +239,9 @@ func reverseIPv4(ips []string) []string {
 
 		var buf [4]byte
 		binary.BigEndian.PutUint32(buf[:], v)
+		ipout := netip.AddrFrom4(buf)
 
-		out = append(out, net.IP(buf[:]).String())
+		out = append(out, ipout.String())
 	}
 
 	return out
