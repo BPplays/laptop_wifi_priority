@@ -5,12 +5,16 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"strings"
+
 	// "math/bits"
 	// "net"
 	"net/netip"
 	"os"
 
 	"github.com/godbus/dbus/v5"
+	"github.com/projectdiscovery/utils/slice"
+	"golang.org/x/text/cases"
 	"gopkg.in/yaml.v2"
 )
 
@@ -247,12 +251,55 @@ func reverseIPv4(ips []string) []string {
 	return out
 }
 
+func decide_auto_ns(base []string, ns_list []netip.Addr, preferAuto bool) ([]string) {
+	switch {
+	case preferAuto && (len(ns_list) > 0):
+		log.Printf("using automatic servers: %v\n", ns_list)
+		return addrs_to_strings(ns_list)
+	case (len(base) <= 0) && (len(ns_list) > 0):
+		log.Printf("using automatic servers: %v\n", ns_list)
+		return addrs_to_strings(ns_list)
+	}
+	return base
+}
+
+func addrs_to_strings(addrs []netip.Addr) (out []string) {
+	for _, a := range addrs {
+		out = append(out, a.String())
+	}
+	return
+}
+
+func parse_ns_string(servs string) []netip.Addr {
+	var out []netip.Addr
+
+	for _, s := range strings.Fields(servs) {
+		ip, err := netip.ParseAddr(s)
+		if err != nil {
+			continue
+		}
+
+		out = append(out, ip)
+	}
+
+	out = sliceutil.Dedupe(out)
+	return out
+}
+
 func main() {
 	currentIf := flag.String("i", "", "")
 	_ = flag.String("a", "", "")
 	connectionID := flag.String("c", "", "")
+	preferAuto := flag.Bool("pref_auto", false, "Prefer automatic configuration")
+	v6_auto_ns_str := flag.String("v6_auto_ns", "", "")
+	v4_auto_ns_str := flag.String("v4_auto_ns", "", "")
 
 	flag.Parse()
+
+
+	v6_auto_ns := parse_ns_string(*v6_auto_ns_str)
+	v4_auto_ns := parse_ns_string(*v4_auto_ns_str)
+
 
 	log.Printf(
 		"started for IF: %s; CON ID: %s",
@@ -266,6 +313,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
+
+
+	cfg.PrivIPv6 = decide_auto_ns(cfg.PrivIPv6, v6_auto_ns, *preferAuto)
+	cfg.PrivIPv4 = decide_auto_ns(cfg.PrivIPv4, v4_auto_ns, *preferAuto)
 
 
 	log.Printf(

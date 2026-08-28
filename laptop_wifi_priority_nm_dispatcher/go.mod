@@ -8,4 +8,8 @@ require (
 	gopkg.in/yaml.v2 v2.4.0
 )
 
-require golang.org/x/sys v0.47.0 // indirect
+require (
+	github.com/projectdiscovery/blackrock v0.0.2 // indirect
+	github.com/projectdiscovery/utils v0.11.1 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+)
