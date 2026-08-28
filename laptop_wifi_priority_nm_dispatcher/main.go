@@ -145,7 +145,7 @@ func main() {
 			// "method":         "auto",
 			// "addr-gen-mode":  int32(0), // use eui-64
 			// "ip6-privacy":    int32(2),
-			"dns-priority":   int32(1),
+			"dns-priority": int32(1_000),
 			"dns-data":     cfg.PubIPv6,
 			"token":          "",
 		}
@@ -153,7 +153,7 @@ func main() {
 
 		ipv4 := map[string]any{
 			// "method":       "auto",
-			"dns-priority": int32(2),
+			"dns-priority": int32(20_1_000),
 			"dns-data":     cfg.PubIPv4,
 		}
 
