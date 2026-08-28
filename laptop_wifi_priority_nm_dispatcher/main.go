@@ -124,7 +124,11 @@ func main() {
 			continue
 		}
 		if *currentIf != "" {
-			if sMap["connection"]["id"] != *currentIf { continue }
+			// if sMap["connection"]["id"] != *currentIf { continue }
+			iface, _ := sMap["connection"]["interface-name"].(string)
+			if iface != *currentIf {
+				continue
+			}
 		}
 
 		// Only care about 802‑11‑wireless
