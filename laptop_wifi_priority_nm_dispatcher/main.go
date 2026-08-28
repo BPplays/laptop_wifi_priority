@@ -11,6 +11,7 @@ import (
 	// "net"
 	"net/netip"
 	"os"
+	"slices"
 
 	"github.com/godbus/dbus/v5"
 	"github.com/projectdiscovery/utils/slice"
@@ -25,13 +26,13 @@ const (
 )
 
 type Config struct {
-	Prefixes  []string `yaml:"prefixes"`
+	WifiPrefixes  []string `yaml:"wifi_prefixes"`
 	LocalNetworks  []netip.Prefix `yaml:"local_networks"`
-	PrivIPv6  []string `yaml:"priv_ipv6"`
-	PrivIPv4  []string `yaml:"priv_ipv4"`
-	PubIPv6   []string `yaml:"pub_ipv6"`
-	PubIPv4   []string `yaml:"pub_ipv4"`
-	Ipv6Token string   `yaml:"ipv6_token"`
+	PrivIPv6  []netip.Addr `yaml:"priv_ipv6"`
+	PrivIPv4  []netip.Addr `yaml:"priv_ipv4"`
+	PubIPv6   []netip.Addr `yaml:"pub_ipv6"`
+	PubIPv4   []netip.Addr `yaml:"pub_ipv4"`
+	Ipv6Token netip.Addr   `yaml:"ipv6_token"`
 }
 
 // NetworkManager legacy IPv6 address:
@@ -225,14 +226,10 @@ func normalizeSettings(
 }
 
 
-func reverseIPv4(ips []string) []string {
-	out := make([]string, 0, len(ips))
+func reverseIPv4(ips []netip.Addr) []netip.Addr {
+	out := make([]netip.Addr, 0, len(ips))
 
-	for _, ipStr := range ips {
-		ip, err := netip.ParseAddr(ipStr)
-		if err != nil {
-			continue
-		}
+	for _, ip := range ips {
 		if !ip.Is4() {
 			continue
 		}
@@ -245,22 +242,31 @@ func reverseIPv4(ips []string) []string {
 		binary.BigEndian.PutUint32(buf[:], v)
 		ipout := netip.AddrFrom4(buf)
 
-		out = append(out, ipout.String())
+		out = append(out, ipout)
 	}
 
 	return out
 }
 
-func decide_auto_ns(base []string, ns_list []netip.Addr, preferAuto bool) ([]string) {
+func decide_auto_ns(base []netip.Addr, ns_list []netip.Addr, preferAuto bool) ([]netip.Addr) {
 	switch {
 	case preferAuto && (len(ns_list) > 0):
 		log.Printf("using automatic servers: %v\n", ns_list)
-		return addrs_to_strings(ns_list)
+		return ns_list
 	case (len(base) <= 0) && (len(ns_list) > 0):
 		log.Printf("using automatic servers: %v\n", ns_list)
-		return addrs_to_strings(ns_list)
+		return ns_list
 	}
 	return base
+}
+
+func anyAddrsInNetworks(addrs []netip.Addr, networks []netip.Prefix) (bool) {
+	for _, network := range networks {
+		if slices.ContainsFunc(addrs, network.Contains) {
+			return true
+		}
+	}
+	return false
 }
 
 func addrs_to_strings(addrs []netip.Addr) (out []string) {
@@ -273,7 +279,7 @@ func addrs_to_strings(addrs []netip.Addr) (out []string) {
 func parse_ns_string(servs string) []netip.Addr {
 	var out []netip.Addr
 
-	for _, s := range strings.Fields(servs) {
+	for s := range strings.FieldsSeq(servs) {
 		ip, err := netip.ParseAddr(s)
 		if err != nil {
 			continue
@@ -482,36 +488,40 @@ func main() {
 		delete(ipv4, "dns")
 
 		/*
-		 * Public/default configuration.
+		 * Default configuration.
 		 */
 		ipv6["dns-priority"] =
 			dbus.MakeVariant(int32(1000))
 
-		ipv6["dns-data"] =
-			dbus.MakeVariant(cfg.PubIPv6)
-
 		ipv4["dns-priority"] =
 			dbus.MakeVariant(int32(201000))
-
-		ipv4["dns-data"] =
-			dbus.MakeVariant(cfg.PubIPv4)
 
 		/*
 		 * Private network.
 		 */
-		if hasPrefixAny(name, cfg.Prefixes) {
+		local_networks_match :=
+		anyAddrsInNetworks(append(v6_auto_ns, v4_auto_ns...), cfg.LocalNetworks)
+
+		if hasPrefixAny(name, cfg.WifiPrefixes) ||
+		local_networks_match {
+			if local_networks_match {
+				log.Println(
+					" -> Matched network provided DNS to a Local domain treating as private",
+				)
+			}
+
 			log.Println(
 				" -> Private network: applying private DNS + token",
 			)
 
 			ipv6["dns-data"] =
-				dbus.MakeVariant(cfg.PrivIPv6)
+				dbus.MakeVariant(addrs_to_strings(cfg.PrivIPv6))
 
 			ipv6["token"] =
 				dbus.MakeVariant(cfg.Ipv6Token)
 
 			ipv4["dns-data"] =
-				dbus.MakeVariant(cfg.PrivIPv4)
+				dbus.MakeVariant(addrs_to_strings(cfg.PrivIPv4))
 
 		} else if connectionType == "802-3-ethernet" {
 			log.Println(
@@ -519,14 +529,20 @@ func main() {
 			)
 
 			delete(ipv6, "token")
-			delete(ipv6, "dns-data")
-			delete(ipv4, "dns-data")
+			// delete(ipv6, "dns-data")
+			// delete(ipv4, "dns-data")
 
 		} else {
 			/*
 			 * Non-private Wi-Fi.
 			 */
 			delete(ipv6, "token")
+
+			ipv6["dns-data"] =
+				dbus.MakeVariant(addrs_to_strings(cfg.PubIPv6))
+
+			ipv4["dns-data"] =
+				dbus.MakeVariant(addrs_to_strings(cfg.PubIPv4))
 		}
 
 		/*
