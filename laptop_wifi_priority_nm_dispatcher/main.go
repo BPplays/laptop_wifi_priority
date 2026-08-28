@@ -127,6 +127,7 @@ func main() {
 			// if sMap["connection"]["id"] != *currentIf { continue }
 			iface, _ := sMap["connection"]["interface-name"].(string)
 			if iface != *currentIf {
+				log.Printf(" → skip %s: not equal to -i [%s]\n", iface, currentIf)
 				continue
 			}
 		}
