@@ -1,25 +1,28 @@
 package main
 
 import (
-	"encoding/binary"
 	"flag"
-	"fmt"
 	"log"
-	"net"
 	"os"
 
-	"github.com/Wifx/gonetworkmanager"
+	"github.com/godbus/dbus/v5"
 	"gopkg.in/yaml.v2"
 )
 
-// Config holds the list of SSID prefixes and DNS/token settings
+const (
+	nmService             = "org.freedesktop.NetworkManager"
+	nmSettingsPath        = "/org/freedesktop/NetworkManager/Settings"
+	nmSettingsInterface   = "org.freedesktop.NetworkManager.Settings"
+	nmConnectionInterface = "org.freedesktop.NetworkManager.Settings.Connection"
+)
+
 type Config struct {
-	Prefixes []string `yaml:"prefixes"`
-	PrivIPv6 []string `yaml:"priv_ipv6"`
-	PrivIPv4 []string `yaml:"priv_ipv4"`
-	PubIPv6  []string `yaml:"pub_ipv6"`
-	PubIPv4  []string `yaml:"pub_ipv4"`
-	Ipv6Token    string   `yaml:"ipv6_token"`
+	Prefixes  []string `yaml:"prefixes"`
+	PrivIPv6  []string `yaml:"priv_ipv6"`
+	PrivIPv4  []string `yaml:"priv_ipv4"`
+	PubIPv6   []string `yaml:"pub_ipv6"`
+	PubIPv4   []string `yaml:"pub_ipv4"`
+	Ipv6Token string   `yaml:"ipv6_token"`
 }
 
 func loadConfig(path string) (*Config, error) {
@@ -27,10 +30,12 @@ func loadConfig(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
+
 	return &cfg, nil
 }
 
@@ -40,175 +45,235 @@ func hasPrefixAny(name string, prefixes []string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
-func ipsToBytes(addrs []string) ([][]byte, error) {
-    var out [][]byte
-    for _, s := range addrs {
-        ip := net.ParseIP(s).To16()
-        if ip == nil {
-            return nil, fmt.Errorf("invalid IPv6 address: %s", s)
-        }
-        out = append(out, ip)
-    }
-    return out, nil
-}
+func getString(
+	settings map[string]map[string]dbus.Variant,
+	section string,
+	property string,
+) (string, bool) {
+	sectionMap, ok := settings[section]
+	if !ok {
+		return "", false
+	}
 
-func ipsToUint32(addrs []string) ([]uint32, error) {
-    var out []uint32
-    for _, s := range addrs {
-        ip := net.ParseIP(s).To4()
-        if ip == nil {
-            return nil, fmt.Errorf("invalid IPv4 address: %s", s)
-        }
-        // out = append(out, binary.BigEndian.Uint32(ip))
-        out = append(out, binary.LittleEndian.Uint32(ip))
-    }
-    return out, nil
+	v, ok := sectionMap[property]
+	if !ok {
+		return "", false
+	}
+
+	s, ok := v.Value().(string)
+	return s, ok
 }
 
 func main() {
 	currentIf := flag.String("i", "", "")
-	_ = flag.String("a", "", "") // if we need `action` later
-	connection_id := flag.String("c", "", "")
+	_ = flag.String("a", "", "")
+	connectionID := flag.String("c", "", "")
 
 	flag.Parse()
 
-	log.Printf("started for IF: %s; CON ID: %s\n", *currentIf, *connection_id)
+	log.Printf(
+		"started for IF: %s; CON ID: %s",
+		*currentIf,
+		*connectionID,
+	)
 
-
-	// Load your YAML config
 	cfg, err := loadConfig("/etc/laptop_wifi_priority_nm_pre_up.yml")
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
-	// fmt.Println("token to nmformat: %v")
-
-    // privIPv6Bytes, err := ipsToBytes(cfg.PrivIPv6)
-    // if err != nil {
-    //     log.Fatalf("invalid priv_ipv6 in config: %v", err)
-    // }
-    // pubIPv6Bytes, err := ipsToBytes(cfg.PubIPv6)
-    // if err != nil {
-    //     log.Fatalf("invalid pub_ipv6 in config: %v", err)
-    // }
-    //
-    // privIPv4Nums, err := ipsToUint32(cfg.PrivIPv4)
-    // if err != nil {
-    //     log.Fatalf("invalid priv_ipv4 in config: %v", err)
-    // }
-    // pubIPv4Nums, err := ipsToUint32(cfg.PubIPv4)
-    // if err != nil {
-    //     log.Fatalf("invalid pub_ipv4 in config: %v", err)
-    // }
-
-	// Connect to NM Settings interface
-	settingsSvc, err := gonetworkmanager.NewSettings()
+	// Connect to the system D-Bus.
+	bus, err := dbus.SystemBus()
 	if err != nil {
-		log.Fatalf("cannot connect to NM Settings: %v\n", err)
+		log.Fatalf("cannot connect to system D-Bus: %v", err)
 	}
 
-	// List all saved connections
-	conns, err := settingsSvc.ListConnections()
+	// Get NetworkManager Settings object.
+	settingsObj := bus.Object(
+		nmService,
+		dbus.ObjectPath(nmSettingsPath),
+	)
+
+	// List saved connection object paths.
+	var connectionPaths []dbus.ObjectPath
+
+	err = settingsObj.Call(
+		nmSettingsInterface+".ListConnections",
+		0,
+	).Store(&connectionPaths)
 	if err != nil {
-		log.Fatalf("failed to list NM connections: %v\n", err)
+		log.Fatalf("failed to list NM connections: %v", err)
 	}
 
-	// Iterate & patch each Wi‑Fi connection
-	for _, conn := range conns {
-		// Fetch full settings map
-		sMap, err := conn.GetSettings()
+	for _, connectionPath := range connectionPaths {
+		connObj := bus.Object(nmService, connectionPath)
+
+		/*
+		 * GetSettings directly through D-Bus.
+		 *
+		 * This is the important difference from gonetworkmanager:
+		 * values remain dbus.Variant values, preserving their original
+		 * D-Bus signatures.
+		 */
+		var settings map[string]map[string]dbus.Variant
+
+		err := connObj.Call(
+			nmConnectionInterface+".GetSettings",
+			0,
+		).Store(&settings)
+
 		if err != nil {
-			log.Printf(" → skip %s: cannot read settings: %v\n", conn.GetPath(), err)
-			continue
-		}
-		if *connection_id != "" {
-			if sMap["connection"]["id"] != *connection_id { continue }
-			// iface, _ := sMap["connection"]["interface-name"].(string)
-			// if iface != *currentIf {
-			// 	log.Printf(" → skip %s: not equal to -i [%s]\n", iface, *currentIf)
-			// 	continue
-			// } else {
-			// 	log.Printf(" → found %s\n", iface, *currentIf)
-			// }
-		}
-
-		// Only care about 802‑11‑wireless
-		cType := sMap["connection"]["type"].(string)
-		if cType != "802-11-wireless" && cType != "802-3-ethernet" {
+			log.Printf(
+				" → skip %s: cannot read settings: %v",
+				connectionPath,
+				err,
+			)
 			continue
 		}
 
-		name := sMap["connection"]["id"].(string)
-		log.Printf("Modifying connection: %s\n", name)
+		connectionSection, ok := settings["connection"]
+		if !ok {
+			log.Printf(
+				" → skip %s: missing connection section",
+				connectionPath,
+			)
+			continue
+		}
 
+		/*
+		 * connection.type
+		 */
+		typeVariant, ok := connectionSection["type"]
+		if !ok {
+			log.Printf(
+				" → skip %s: missing connection.type",
+				connectionPath,
+			)
+			continue
+		}
 
-		ipv6 := sMap["ipv6"]
-		ipv4 := sMap["ipv4"]
+		connectionType, ok := typeVariant.Value().(string)
+		if !ok {
+			log.Printf(
+				" → skip %s: invalid connection.type",
+				connectionPath,
+			)
+			continue
+		}
 
-		ipv6["dns-priority"] = int32(1_000)
-		ipv6["dns-data"] = cfg.PubIPv6
-		ipv6["token"] = ""
+		if connectionType != "802-11-wireless" &&
+			connectionType != "802-3-ethernet" {
+			continue
+		}
 
-		ipv4["dns-priority"] = int32(20_1_000)
-		ipv4["dns-data"] = cfg.PubIPv4
+		/*
+		 * connection.id
+		 */
+		name, ok := getString(settings, "connection", "id")
+		if !ok {
+			log.Printf(
+				" → skip %s: missing connection.id",
+				connectionPath,
+			)
+			continue
+		}
 
-		// ipv6 := map[string]any{
-		// 	// "method":         "auto",
-		// 	// "addr-gen-mode":  int32(0), // use eui-64
-		// 	// "ip6-privacy":    int32(2),
-		// 	"dns-priority": int32(1_000),
-		// 	"dns-data":     cfg.PubIPv6,
-		// 	"token":          "",
-		// }
-		//
-		//
-		// ipv4 := map[string]any{
-		// 	// "method":       "auto",
-		// 	"dns-priority": int32(20_1_000),
-		// 	"dns-data":     cfg.PubIPv4,
-		// }
+		/*
+		 * Restrict to one connection when -c was supplied.
+		 */
+		if *connectionID != "" && name != *connectionID {
+			continue
+		}
 
-		// fmt.Println(cfg.PrivIPv6)
-		// fmt.Println(cfg.PrivIPv4)
-		// fmt.Println(cfg.PubIPv6)
-		// fmt.Println(cfg.PubIPv4)
-		//
-		//
-		// fmt.Println(cfg.Ipv6Token)
-		// ctok := sMap["ipv6"]["token"]
-		// if ctok != nil {
-		// 	fmt.Println(ctok)
-		// }
+		log.Printf("Modifying connection: %s", name)
 
+		ipv6, ok := settings["ipv6"]
+		if !ok {
+			log.Printf(
+				" → skip %s: missing ipv6 settings",
+				name,
+			)
+			continue
+		}
+
+		ipv4, ok := settings["ipv4"]
+		if !ok {
+			log.Printf(
+				" → skip %s: missing ipv4 settings",
+				name,
+			)
+			continue
+		}
+
+		/*
+		 * Defaults.
+		 *
+		 * Everything else in ipv4/ipv6 remains untouched.
+		 */
+		ipv6["dns-priority"] = dbus.MakeVariant(int32(1000))
+		ipv6["dns-data"] = dbus.MakeVariant(cfg.PubIPv6)
+
+		ipv4["dns-priority"] = dbus.MakeVariant(int32(201000))
+		ipv4["dns-data"] = dbus.MakeVariant(cfg.PubIPv4)
+
+		/*
+		 * Private network.
+		 */
 		if hasPrefixAny(name, cfg.Prefixes) {
 			log.Println(" -> Private network: applying private DNS + token")
-			ipv6["dns-data"] = cfg.PrivIPv6
-			ipv6["token"] = cfg.Ipv6Token
-			ipv4["dns-data"] = cfg.PrivIPv4
-		} else if cType == "802-3-ethernet" {
-			log.Println(" -> Ethernet network: setting dns and token to default")
 
-			// ipv6["dns"] = privIPv6Bytes
-			// ipv4["dns"] = privIPv4Nums
+			ipv6["dns-data"] = dbus.MakeVariant(cfg.PrivIPv6)
+			ipv6["token"] = dbus.MakeVariant(cfg.Ipv6Token)
 
+			ipv4["dns-data"] = dbus.MakeVariant(cfg.PrivIPv4)
+
+		} else if connectionType == "802-3-ethernet" {
+			log.Println(" -> Ethernet network: restoring default DNS/token")
+
+			/*
+			 * Removing the Variant means the setting/property is
+			 * omitted from the resulting profile.
+			 */
 			delete(ipv6, "token")
 			delete(ipv6, "dns-data")
 			delete(ipv4, "dns-data")
-		}
-
-		// Inject our maps back into the connection settings
-		sMap["ipv6"] = ipv6
-		sMap["ipv4"] = ipv4
-
-
-		// Commit the update
-		if err := conn.Update(sMap); err != nil {
-			log.Printf(" ✗ failed to update %s: %v\n", name, err)
 		} else {
-			log.Printf(" ✓ updated %s\n", name)
+			/*
+			 * Non-private Wi-Fi: use public DNS and no token.
+			 */
+			delete(ipv6, "token")
 		}
+
+		/*
+		 * Update2() still requires the complete connection settings.
+		 *
+		 * However, because we got the settings directly as
+		 * map[string]map[string]dbus.Variant, properties we did not
+		 * touch retain their original D-Bus signatures.
+		 */
+		var result map[string]dbus.Variant
+
+		err = connObj.Call(
+			nmConnectionInterface+".Update2",
+			0,
+			settings,
+			uint32(1), // to-disk
+			map[string]dbus.Variant{},
+		).Store(&result)
+
+		if err != nil {
+			log.Printf(
+				" ✗ failed to update %s: %v",
+				name,
+				err,
+			)
+			continue
+		}
+
+		log.Printf(" ✓ updated %s", name)
 	}
 }
