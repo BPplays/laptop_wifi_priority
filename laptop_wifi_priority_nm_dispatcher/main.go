@@ -74,6 +74,9 @@ func main() {
 
 	flag.Parse()
 
+	log.Printf("started for IF: %s\n", *currentIf)
+
+
 	// Load your YAML config
 	cfg, err := loadConfig("/etc/laptop_wifi_priority_nm_pre_up.yml")
 	if err != nil {
@@ -103,13 +106,13 @@ func main() {
 	// Connect to NM Settings interface
 	settingsSvc, err := gonetworkmanager.NewSettings()
 	if err != nil {
-		log.Fatalf("cannot connect to NM Settings: %v", err)
+		log.Fatalf("cannot connect to NM Settings: %v\n", err)
 	}
 
 	// List all saved connections
 	conns, err := settingsSvc.ListConnections()
 	if err != nil {
-		log.Fatalf("failed to list NM connections: %v", err)
+		log.Fatalf("failed to list NM connections: %v\n", err)
 	}
 
 	// Iterate & patch each Wi‑Fi connection
@@ -117,7 +120,7 @@ func main() {
 		// Fetch full settings map
 		sMap, err := conn.GetSettings()
 		if err != nil {
-			log.Printf(" → skip %s: cannot read settings: %v", conn.GetPath(), err)
+			log.Printf(" → skip %s: cannot read settings: %v\n", conn.GetPath(), err)
 			continue
 		}
 		if *currentIf != "" {
@@ -183,9 +186,9 @@ func main() {
 
 		// Commit the update
 		if err := conn.Update(sMap); err != nil {
-			log.Printf(" ✗ failed to update %s: %v", name, err)
+			log.Printf(" ✗ failed to update %s: %v\n", name, err)
 		} else {
-			fmt.Printf(" ✓ updated %s\n", name)
+			log.Printf(" ✓ updated %s\n", name)
 		}
 	}
 }
