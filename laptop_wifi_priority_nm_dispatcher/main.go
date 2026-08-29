@@ -444,11 +444,12 @@ func main() {
 		 * Restrict to -c when requested.
 		 */
 		if *connectionID != ""{
-			local_networks_match =
-			anyAddrsInNetworks(append(v6_auto_ns, v4_auto_ns...), cfg.LocalNetworks)
 			if name != *connectionID {
 				continue
 			}
+
+			local_networks_match =
+			anyAddrsInNetworks(append(v6_auto_ns, v4_auto_ns...), cfg.LocalNetworks)
 		}
 
 		log.Printf("Modifying connection: %s", name)
