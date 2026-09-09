@@ -527,12 +527,12 @@ func main() {
 		local_networks_match {
 			if local_networks_match {
 				log.Println(
-					" -> Matched network provided DNS to a Local network; treating as private",
+					" → Matched network provided DNS to a Local network; treating as private",
 				)
 			}
 
 			log.Println(
-				" -> Private network: applying private DNS + token",
+				" → Private network: applying private DNS + token",
 			)
 
 			ipv6["dns-data"] =
@@ -550,7 +550,7 @@ func main() {
 			 */
 
 			log.Println(
-				" -> Private network: applying private DNS + token",
+				" → Private network: applying private DNS + token",
 			)
 
 			delete(ipv6, "token")
