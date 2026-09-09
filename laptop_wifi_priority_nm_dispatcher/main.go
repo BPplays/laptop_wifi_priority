@@ -517,10 +517,12 @@ func main() {
 		ipv4["dns-priority"] =
 			dbus.MakeVariant(int32(0x20_1000))
 
+		is_priv := false
+		is_pub := false
+
 		/*
 		 * Private network.
 		 */
-
 		if hasPrefixAny(name, cfg.WifiPrefixes) ||
 		local_networks_match {
 			if local_networks_match {
@@ -546,6 +548,11 @@ func main() {
 			/*
 			 * Non-private Network.
 			 */
+
+			log.Println(
+				" -> Private network: applying private DNS + token",
+			)
+
 			delete(ipv6, "token")
 
 			ipv6["dns-data"] =
@@ -579,6 +586,19 @@ func main() {
 			continue
 		}
 
-		log.Printf(" ◯ updated %s", name)
+
+		final_type := ""
+		if is_priv && is_pub {
+			log.Println(
+				"error somehow private and public??? this should be impossible",
+			)
+			final_type = "big fat error"
+		} else if is_priv {
+			final_type = "private"
+		} else if is_pub {
+			final_type = "public"
+		}
+
+		log.Printf(" ◯ updated %s [%s]", name, final_type)
 	}
 }
