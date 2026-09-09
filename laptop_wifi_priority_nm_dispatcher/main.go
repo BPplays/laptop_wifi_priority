@@ -520,11 +520,13 @@ func main() {
 		is_priv := false
 		is_pub := false
 
-		/*
-		 * Private network.
-		 */
 		if hasPrefixAny(name, cfg.WifiPrefixes) ||
 		local_networks_match {
+			is_priv = true
+			/*
+			 * Private network.
+			 */
+
 			if local_networks_match {
 				log.Println(
 					" → Matched network provided DNS to a Local network; treating as private",
@@ -545,6 +547,7 @@ func main() {
 				dbus.MakeVariant(addrs_to_strings(cfg.PrivIPv4))
 
 		} else {
+			is_pub = true
 			/*
 			 * Non-private Network.
 			 */
@@ -592,7 +595,9 @@ func main() {
 			log.Println(
 				"error somehow private and public??? this should be impossible",
 			)
-			final_type = "big fat error"
+			final_type = "big fat error (type 1)"
+		} else if (!is_priv) && (!is_pub) {
+			final_type = "big fat error (type 2)"
 		} else if is_priv {
 			final_type = "private"
 		} else if is_pub {
