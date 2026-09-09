@@ -425,8 +425,12 @@ func main() {
 			continue
 		}
 
-		if connectionType != "802-11-wireless" &&
-			connectionType != "802-3-ethernet" {
+		allowedConnectionTypes := map[string]struct{}{
+			"802-11-wireless": {},
+			"802-3-ethernet":  {},
+		}
+
+		if _, ok := allowedConnectionTypes[connectionType]; !ok {
 			continue
 		}
 
@@ -455,9 +459,13 @@ func main() {
 				continue
 			}
 
-			local_networks_match =
-			anyAddrsInNetworks(append(v6_auto_ns, v4_auto_ns...), cfg.LocalNetworks)
 		}
+
+		auto_ns := make([]netip.Addr, 0, len(v6_auto_ns)+len(v4_auto_ns))
+		auto_ns = append(auto_ns, v6_auto_ns...)
+		auto_ns = append(auto_ns, v4_auto_ns...)
+
+		local_networks_match = anyAddrsInNetworks(auto_ns, cfg.LocalNetworks)
 
 		log.Printf("Modifying connection: %s", name)
 
@@ -504,10 +512,10 @@ func main() {
 		 * Default configuration.
 		 */
 		ipv6["dns-priority"] =
-			dbus.MakeVariant(int32(1000))
+			dbus.MakeVariant(int32(0x1000))
 
 		ipv4["dns-priority"] =
-			dbus.MakeVariant(int32(201000))
+			dbus.MakeVariant(int32(0x20_1000))
 
 		/*
 		 * Private network.
@@ -534,18 +542,9 @@ func main() {
 			ipv4["dns-data"] =
 				dbus.MakeVariant(addrs_to_strings(cfg.PrivIPv4))
 
-		} else if connectionType == "802-3-ethernet" {
-			log.Println(
-				" -> Ethernet network: restoring default DNS/token",
-			)
-
-			delete(ipv6, "token")
-			// delete(ipv6, "dns-data")
-			// delete(ipv4, "dns-data")
-
 		} else {
 			/*
-			 * Non-private Wi-Fi.
+			 * Non-private Network.
 			 */
 			delete(ipv6, "token")
 
