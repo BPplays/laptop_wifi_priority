@@ -342,9 +342,16 @@ func main() {
 
 
 	log.Printf(
-		" → private IPv4 dns: %v; and reversed: %v",
+		" → private IPv6 DNS: %v; → public IPv6 DNS: %v",
+		cfg.PrivIPv6,
+		cfg.PubIPv6,
+		)
+	log.Printf(
+		" → private IPv4 DNS: %v; → public IPv4 DNS: %v",
+		// " → private IPv4 dns: %v; and reversed: %v",
 		cfg.PrivIPv4,
-		reverseIPv4(cfg.PrivIPv4),
+		cfg.PubIPv4,
+		// reverseIPv4(cfg.PrivIPv4),
 		)
 
 	/*
