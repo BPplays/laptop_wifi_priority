@@ -517,6 +517,9 @@ func main() {
 		ipv4["dns-priority"] =
 			dbus.MakeVariant(int32(0x20_1000))
 
+		ipv6["ignore-auto-dns"] = dbus.MakeVariant(true)
+		ipv4["ignore-auto-dns"] = dbus.MakeVariant(true)
+
 		is_priv := false
 		is_pub := false
 
