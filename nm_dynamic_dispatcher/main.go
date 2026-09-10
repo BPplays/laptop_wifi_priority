@@ -19,6 +19,8 @@ import (
 )
 
 const (
+	defConfigLoc = "/etc/nm_dynamic_dispatcher.yml"
+
 	nmService             = "org.freedesktop.NetworkManager"
 	nmSettingsPath        = "/org/freedesktop/NetworkManager/Settings"
 	nmSettingsInterface   = "org.freedesktop.NetworkManager.Settings"
@@ -26,13 +28,13 @@ const (
 )
 
 type Config struct {
-	WifiPrefixes  []string `yaml:"wifi_prefixes"`
-	LocalNetworks  []netip.Prefix `yaml:"local_networks"`
-	PrivIPv6  []netip.Addr `yaml:"priv_ipv6"`
-	PrivIPv4  []netip.Addr `yaml:"priv_ipv4"`
-	PubIPv6   []netip.Addr `yaml:"pub_ipv6"`
-	PubIPv4   []netip.Addr `yaml:"pub_ipv4"`
-	Ipv6Token netip.Addr   `yaml:"ipv6_token"`
+	WifiPrefixes   []string        `yaml:"wifi_prefixes"`
+	LocalNetworks  []netip.Prefix  `yaml:"local_networks"`
+	PrivIPv6       []netip.Addr    `yaml:"priv_ipv6"`
+	PrivIPv4       []netip.Addr    `yaml:"priv_ipv4"`
+	PubIPv6        []netip.Addr    `yaml:"pub_ipv6"`
+	PubIPv4        []netip.Addr    `yaml:"pub_ipv4"`
+	Ipv6Token      netip.Addr      `yaml:"ipv6_token"`
 }
 
 // NetworkManager legacy IPv6 address:
@@ -293,12 +295,41 @@ func parse_ns_string(servs string) []netip.Addr {
 }
 
 func main() {
-	currentIf := flag.String("i", "", "")
-	_ = flag.String("a", "", "")
-	connectionID := flag.String("c", "", "")
-	preferAuto := flag.Bool("pref_auto", false, "Prefer automatic configuration")
-	v6_auto_ns_str := flag.String("v6_auto_ns", "", "")
-	v4_auto_ns_str := flag.String("v4_auto_ns", "", "")
+	currentIf := flag.String("i", "", "current interface")
+	// _ = flag.String("a", "", "")
+	connectionID := flag.String("c", "", "connection id")
+	configLoc := flag.String("config", defConfigLoc, fmt.Sprint(
+		"override location of the config",
+	))
+	preferAuto := flag.Bool(
+		"pref_auto",
+		false,
+		"Prefer configuration from automatic name servers values if available",
+	)
+	v6_auto_ns_str := flag.String(
+		"v6_auto_ns",
+		"",
+		"automatic name servers from the network as a space separated list",
+	)
+	v4_auto_ns_str := flag.String(
+		"v4_auto_ns",
+		"",
+		"automatic name servers from the network as a space separated list",
+	)
+
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n\n", os.Args[0])
+		fmt.Fprintln(os.Stderr, "Options:")
+		flag.VisitAll(func(f *flag.Flag) {
+			fmt.Fprintf(os.Stderr, "  -%-12s\n    %s\n", f.Name, f.Usage)
+			if f.DefValue == "" {
+				f.DefValue = fmt.Sprintf("\"%s\"", f.DefValue)
+			}
+			fmt.Fprintf(os.Stderr, "    → %s\n", f.DefValue)
+			fmt.Fprintf(os.Stderr, "\n")
+
+		})
+	}
 
 	flag.Parse()
 
@@ -314,7 +345,7 @@ func main() {
 	)
 
 	cfg, err := loadConfig(
-		"/etc/laptop_wifi_priority_nm_dispatcher.yml",
+		*configLoc,
 	)
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
