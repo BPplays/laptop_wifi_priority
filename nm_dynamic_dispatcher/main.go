@@ -625,7 +625,7 @@ func main() {
 				dbus.MakeVariant(addrs_to_strings(cfg.PrivIPv6))
 
 			ipv6["token"] =
-				dbus.MakeVariant(cfg.GetIPv6Token(*currentIf))
+				dbus.MakeVariant(cfg.GetIPv6Token(*currentIf).String())
 
 			ipv4["dns-data"] =
 				dbus.MakeVariant(addrs_to_strings(cfg.PrivIPv4))
