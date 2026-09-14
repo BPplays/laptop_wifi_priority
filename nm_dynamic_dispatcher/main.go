@@ -16,6 +16,7 @@ import (
 	"github.com/godbus/dbus/v5"
 	"github.com/projectdiscovery/utils/slice"
 	"gopkg.in/yaml.v2"
+	"github.com/vishvananda/netlink"
 )
 
 const (
@@ -28,13 +29,62 @@ const (
 )
 
 type Config struct {
-	WifiPrefixes   []string        `yaml:"wifi_prefixes"`
-	LocalNetworks  []netip.Prefix  `yaml:"local_networks"`
-	PrivIPv6       []netip.Addr    `yaml:"priv_ipv6"`
-	PrivIPv4       []netip.Addr    `yaml:"priv_ipv4"`
-	PubIPv6        []netip.Addr    `yaml:"pub_ipv6"`
-	PubIPv4        []netip.Addr    `yaml:"pub_ipv4"`
-	Ipv6Token      netip.Addr      `yaml:"ipv6_token"`
+	WifiPrefixes   []string                  `yaml:"wifi_prefixes"`
+	LocalNetworks  []netip.Prefix            `yaml:"local_networks"`
+	PrivIPv6       []netip.Addr              `yaml:"priv_ipv6"`
+	PrivIPv4       []netip.Addr              `yaml:"priv_ipv4"`
+	PubIPv6        []netip.Addr              `yaml:"pub_ipv6"`
+	PubIPv4        []netip.Addr              `yaml:"pub_ipv4"`
+	Ipv6Token      map[string]netip.Addr     `yaml:"ipv6_token"`
+}
+func (c Config) GetIPv6Token(ifName string) netip.Addr {
+	// Try the exact name first.
+	if addr, ok := c.Ipv6Token[ifName]; ok {
+		return addr
+	}
+
+	links, err := netlink.LinkList()
+	if err == nil {
+		for _, link := range links {
+			attrs := link.Attrs()
+			if attrs == nil {
+				continue
+			}
+
+			// Check whether ifName is this interface's main name
+			// or one of its alternative names.
+			isThisInterface := attrs.Name == ifName
+
+			if !isThisInterface {
+				for _, altName := range attrs.AltNames {
+					if altName == ifName {
+						isThisInterface = true
+						break
+					}
+				}
+			}
+
+			if !isThisInterface {
+				continue
+			}
+
+			// Try the main interface name.
+			if addr, ok := c.Ipv6Token[attrs.Name]; ok {
+				return addr
+			}
+
+			// Then try every alternative name.
+			for _, altName := range attrs.AltNames {
+				if addr, ok := c.Ipv6Token[altName]; ok {
+					return addr
+				}
+			}
+
+			break
+		}
+	}
+
+	return c.Ipv6Token["*"]
 }
 
 // NetworkManager legacy IPv6 address:
@@ -575,7 +625,7 @@ func main() {
 				dbus.MakeVariant(addrs_to_strings(cfg.PrivIPv6))
 
 			ipv6["token"] =
-				dbus.MakeVariant(cfg.Ipv6Token.String())
+				dbus.MakeVariant(cfg.GetIPv6Token(*currentIf))
 
 			ipv4["dns-data"] =
 				dbus.MakeVariant(addrs_to_strings(cfg.PrivIPv4))
