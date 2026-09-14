@@ -624,8 +624,13 @@ func main() {
 			ipv6["dns-data"] =
 				dbus.MakeVariant(addrs_to_strings(cfg.PrivIPv6))
 
-			ipv6["token"] =
-				dbus.MakeVariant(cfg.GetIPv6Token(*currentIf).String())
+			ipv6["addr-gen-mode"] = dbus.MakeVariant("eui64")
+			token := cfg.GetIPv6Token(*currentIf)
+
+			if token.IsValid() {
+				ipv6["addr-gen-mode"] = dbus.MakeVariant("eui64")
+				ipv6["token"] = dbus.MakeVariant(token.String())
+			}
 
 			ipv4["dns-data"] =
 				dbus.MakeVariant(addrs_to_strings(cfg.PrivIPv4))
@@ -640,6 +645,7 @@ func main() {
 				" → Private network: applying private DNS + token",
 			)
 
+			delete(ipv6, "addr-gen-mode")
 			delete(ipv6, "token")
 
 			ipv6["dns-data"] =
