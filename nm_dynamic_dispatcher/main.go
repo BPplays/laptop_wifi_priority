@@ -346,7 +346,7 @@ func parse_ns_string(servs string) []netip.Addr {
 
 func main() {
 	currentIf := flag.String("i", "", "current interface")
-	// _ = flag.String("a", "", "")
+	_ = flag.String("a", "", "")
 	connectionID := flag.String("c", "", "connection id")
 	configLoc := flag.String("config", defConfigLoc, fmt.Sprint(
 		"override location of the config",
